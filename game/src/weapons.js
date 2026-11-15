@@ -6,7 +6,7 @@
 import { S, addNoise } from './state.js';
 import { WEAPONS, GRENADES, TUNE } from './config.js';
 import { rayHitWall, raySphere, segmentClear, eyeHeight } from './movement.js';
-import { COLLIDERS } from './mapdata.js';
+import { COLLIDERS, DECKS } from './mapdata.js';
 import { spawnTracer, spawnMuzzleFlash, spawnSmokeCloud, spawnExplosion, spawnImpact } from './effects.js';
 import { playShot, playDryFire, playReload, playExplosion, playGrenadeBounce, playFlashRing } from './audio.js';
 import { applyDamage, impactSpark } from './objective.js';
@@ -168,10 +168,12 @@ export function throwGrenade(a, ox, oy, oz, dx, dy, dz) {
 }
 
 function grenadeCollide(gr, dt) {
-  // Axis-separated bounce against colliders and the floor.
+  // Axis-separated bounce against colliders and the floor. A grenade only
+  // bounces off a collider whose height span it overlaps, so one rolling
+  // under the gantry passes beneath the crate sitting on top of it.
   gr.x += gr.vx * dt;
   for (const c of COLLIDERS) {
-    if (gr.y < c.h && gr.x > c.x0 - 0.12 && gr.x < c.x1 + 0.12 && gr.z > c.z0 - 0.12 && gr.z < c.z1 + 0.12) {
+    if (gr.y < c.h && gr.y + 0.12 >= (c.y0 || 0) && gr.x > c.x0 - 0.12 && gr.x < c.x1 + 0.12 && gr.z > c.z0 - 0.12 && gr.z < c.z1 + 0.12) {
       gr.x = gr.vx > 0 ? c.x0 - 0.12 : c.x1 + 0.12;
       gr.vx *= -0.45;
       gr.bounced = true;
@@ -179,7 +181,7 @@ function grenadeCollide(gr, dt) {
   }
   gr.z += gr.vz * dt;
   for (const c of COLLIDERS) {
-    if (gr.y < c.h && gr.x > c.x0 - 0.12 && gr.x < c.x1 + 0.12 && gr.z > c.z0 - 0.12 && gr.z < c.z1 + 0.12) {
+    if (gr.y < c.h && gr.y + 0.12 >= (c.y0 || 0) && gr.x > c.x0 - 0.12 && gr.x < c.x1 + 0.12 && gr.z > c.z0 - 0.12 && gr.z < c.z1 + 0.12) {
       gr.z = gr.vz > 0 ? c.z0 - 0.12 : c.z1 + 0.12;
       gr.vz *= -0.45;
       gr.bounced = true;
@@ -192,11 +194,18 @@ function grenadeCollide(gr, dt) {
     gr.vy *= -0.42;
     gr.vx *= 0.7; gr.vz *= 0.7;
   }
-  // Lids: a grenade landing on a crate rests on it.
+  // Lids: a grenade landing on a crate rests on it, and one landing on
+  // the gantry deck rests on the deck instead of falling through it.
   for (const c of COLLIDERS) {
     if (gr.vy <= 0 && gr.y >= c.h - 0.15 && gr.y < c.h + 0.3
       && gr.x > c.x0 && gr.x < c.x1 && gr.z > c.z0 && gr.z < c.z1) {
       gr.y = c.h + 0.12; gr.vy = 0; gr.vx *= 0.8; gr.vz *= 0.8;
+    }
+  }
+  for (const d of DECKS) {
+    if (gr.vy <= 0 && gr.y >= d.top - 0.15 && gr.y < d.top + 0.3
+      && gr.x > d.x0 && gr.x < d.x1 && gr.z > d.z0 && gr.z < d.z1) {
+      gr.y = d.top + 0.12; gr.vy = 0; gr.vx *= 0.8; gr.vz *= 0.8;
     }
   }
 }

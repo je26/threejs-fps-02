@@ -68,9 +68,9 @@ export function spawnTracer(x1, y1, z1, x2, y2, z2, color) {
   pos.setXYZ(1, x2, y2, z2);
   pos.needsUpdate = true;
   t.line.material.color.setHex(color);
-  t.line.material.opacity = 0.9;
+  t.line.material.opacity = 1;
   t.line.visible = true;
-  t.life = 0.07;
+  t.life = 0.09;
 }
 
 export function spawnImpact(x, y, z, color, count, speed) {
@@ -94,7 +94,7 @@ export function spawnMuzzleFlash(mesh, x, y, z) {
   const f = nextFree(flashes);
   f.mesh.position.set(x, y, z);
   f.mesh.rotation.set(0, mesh ? mesh.rotation.y : 0, Math.random() * Math.PI);
-  f.mesh.scale.setScalar(0.7 + Math.random() * 0.5);
+  f.mesh.scale.setScalar(0.9 + Math.random() * 0.6);
   f.mesh.material.opacity = 0.95;
   f.mesh.visible = true;
   f.life = 0.05;
@@ -130,7 +130,7 @@ export function updateEffects(dt, camera) {
     if (t.life <= 0) continue;
     t.life -= dt;
     if (t.life <= 0) t.line.visible = false;
-    else t.line.material.opacity = t.life / 0.07 * 0.9;
+    else t.line.material.opacity = t.life / 0.09;
   }
   for (const p of particles) {
     if (p.life <= 0) continue;

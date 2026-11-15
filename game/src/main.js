@@ -6,7 +6,8 @@
 import * as THREE from 'three';
 import { S, aliveCount } from './state.js';
 import { TUNE, WEAPONS, GRENADES, DEVICE_NAME } from './config.js';
-import { buildWorld, worldHandles, makeBotMesh, updateBotVisual, makeViewmodels, updateWorldVisuals } from './world.js';
+import { buildWorld, worldHandles, makeBotMesh, updateBotVisual, updateWorldVisuals } from './world.js';
+import { createViewmodel } from './viewmodel.js';
 import { Input, initInput, requestLock, releaseLock, consumeLook, consumeFireEdge, down } from './input.js';
 import { moveActor, eyeHeight } from './movement.js';
 import { tryFire, startReload, updateWeaponTimers, selectSlot, throwGrenade, updateGrenades, currentWeapon, isGrenadeSelected } from './weapons.js';
@@ -23,6 +24,8 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.05, 300);
@@ -30,7 +33,7 @@ scene.add(camera);
 buildWorld(scene);
 initEffects(scene);
 initAudio();
-const viewmodels = makeViewmodels(camera);
+const viewmodel = createViewmodel(camera);
 initInput(canvas);
 initMinimap(document.getElementById('minimap'));
 
@@ -46,7 +49,7 @@ const grenadeMeshes = [];
   }
 }
 
-let vmKick = 0, vmBob = 0, wasLocked = false, lastWeapon = 'secondary';
+let vmBob = 0, wasLocked = false, lastWeapon = 'secondary';
 let menuOrbit = 0;
 
 function ensureMeshes() {
@@ -182,7 +185,7 @@ function playerControl(dt) {
   } else if (Input.fireHeld) {
     if (tryFire(p, p.x, oy, p.z, dir[0], dir[1], dir[2], edge)) {
       const cw = currentWeapon(p);
-      if (cw) vmKick = Math.min(0.09, vmKick + cw.kick);
+      if (cw) viewmodel.onShot(cw.kick);
     }
   }
 }
@@ -225,25 +228,10 @@ function syncRender(dt) {
   camera.rotation.set(0, 0, 0);
   camera.rotateY(p.yaw + p.recoilYaw);
   camera.rotateX(p.pitch + p.recoilPitch);
-  // Viewmodel: active weapon, recoil kick, reload dip, walk sway.
-  vmKick *= Math.max(0, 1 - dt * 9);
-  const vm = viewmodels.models;
-  for (const id of Object.keys(vm)) vm[id].visible = false;
+  // Viewmodel: the active weapon, its recoil kick, reload dip and walk
+  // sway are all driven by viewmodel.js from the player's weapon state.
   const cw = currentWeapon(p);
-  if (cw && p.alive) {
-    vm[cw.id].visible = true;
-    const reloading = p.reloadTimer > 0;
-    viewmodels.root.position.set(
-      0.26 + (p.moving ? Math.sin(vmBob * 0.5) * 0.006 : 0),
-      -0.22 + (reloading ? -0.08 : 0) + bobY * 0.5,
-      -0.6 + vmKick,
-    );
-    viewmodels.root.rotation.x = vmKick * 2.2 + (reloading ? -0.5 : 0);
-    viewmodels.root.rotation.z = reloading ? 0.25 : 0;
-  } else {
-    viewmodels.root.rotation.x = 0;
-    viewmodels.root.rotation.z = 0;
-  }
+  viewmodel.update(dt, p, cw ? cw.id : null, isGrenadeSelected(p) ? p.current : null);
   // Bots and the device.
   for (const a of S.actors) {
     if (!a.isPlayer) updateBotVisual(a, dt, S.time);
@@ -336,13 +324,14 @@ window.addEventListener('resize', () => {
 window.__ember = {
   state: S,
   start: (side) => beginMatch(side || 'atk'),
-  teleport: (x, z) => { if (S.player) { S.player.x = x; S.player.z = z; } },
+  teleport: (x, z, y) => { if (S.player) { S.player.x = x; S.player.z = z; if (y !== undefined) S.player.y = y; } },
   face: (yaw, pitch) => { if (S.player) { S.player.yaw = yaw; S.player.pitch = pitch || 0; } },
+  holdFire: (on) => { Input.fireHeld = !!on; if (on) Input.fireEdge = true; },
   giveMoney: (n) => { if (S.player) S.player.money = n; },
   skipFreeze: () => { if (S.phase === 'freeze') { S.phaseTime = 0.01; } },
   qualityTier: () => qualityTier,
   _three: { renderer, scene, camera },
-  version: '1.0.0',
+  version: '2.0.0',
 };
 
 requestAnimationFrame(frame);

@@ -1,10 +1,11 @@
 // World building: three.js scene, lighting, procedural canvas textures,
-// map meshes from mapdata, bot bodies and first-person viewmodels. One job:
-// everything visible that is not a short-lived effect. All art is generated
-// at runtime from a seed; no external assets.
+// map meshes from mapdata, and bot bodies. One job: everything visible
+// that is not a short-lived effect. (First-person viewmodels live in
+// viewmodel.js.) All art is generated at runtime from a seed; no external
+// assets.
 
 import * as THREE from 'three';
-import { COLLIDERS, SITES, MAP_BOUNDS } from './mapdata.js';
+import { COLLIDERS, SITES, MAP_BOUNDS, DECKS, RAMPS } from './mapdata.js';
 import { TEAMS } from './config.js';
 import { makeRng, hashSeed } from './rng.js';
 
@@ -174,6 +175,7 @@ export function buildWorld(scene) {
     container: new THREE.MeshStandardMaterial({ map: tex.corrugated, roughness: 0.7, metalness: 0.35 }),
     lowwall: new THREE.MeshStandardMaterial({ map: tex.concrete, roughness: 0.9 }),
     barrel: new THREE.MeshStandardMaterial({ color: 0x3e5a66, roughness: 0.55, metalness: 0.5 }),
+    post: new THREE.MeshStandardMaterial({ color: 0x33302a, roughness: 0.6, metalness: 0.5 }),
     hazard: new THREE.MeshStandardMaterial({ map: tex.hazard, roughness: 0.8 }),
   };
   const boxGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -188,12 +190,14 @@ export function buildWorld(scene) {
       scene.add(m);
       continue;
     }
+    // Raised colliders (y0 > 0) sit on the deck: the mesh spans y0..h.
+    const y0 = c.y0 || 0;
     const m = new THREE.Mesh(boxGeo, mats[c.kind] || mats.wall);
-    m.scale.set(w, c.h, d);
-    m.position.set((c.x0 + c.x1) / 2, c.h / 2, (c.z0 + c.z1) / 2);
+    m.scale.set(w, c.h - y0, d);
+    m.position.set((c.x0 + c.x1) / 2, y0 + (c.h - y0) / 2, (c.z0 + c.z1) / 2);
     m.castShadow = true; m.receiveShadow = true;
     scene.add(m);
-    if (c.kind === 'crate' && c.h > 1.5) {
+    if (c.kind === 'crate' && c.h > 1.5 && !y0) {
       // Stacked-crate look: a seam band at the split.
       const band = new THREE.Mesh(boxGeo, mats.crate);
       band.scale.set(w * 1.02, 0.08, d * 1.02);
@@ -213,6 +217,99 @@ export function buildWorld(scene) {
   lintel.scale.set(4.4, 0.5, 1);
   lintel.position.set(0, 4.25, -3.6);
   scene.add(lintel);
+
+  // The Quay Gantry: the overlook deck, its ramps, railings and edge trim.
+  // Geometry is derived from the DECKS/RAMPS data so the visible deck and
+  // the walkable floor always agree.
+  const deckMat = new THREE.MeshStandardMaterial({ map: tex.panel, roughness: 0.9 });
+  const steelMat = new THREE.MeshStandardMaterial({ color: 0x33302a, roughness: 0.6, metalness: 0.5 });
+  for (const d of DECKS) {
+    const w = d.x1 - d.x0, dep = d.z1 - d.z0;
+    const slab = new THREE.Mesh(boxGeo, deckMat);
+    slab.scale.set(w, 0.25, dep);
+    slab.position.set((d.x0 + d.x1) / 2, d.top - 0.125, (d.z0 + d.z1) / 2);
+    slab.castShadow = true; slab.receiveShadow = true;
+    scene.add(slab);
+    // Hazard strip along the south edge, facing the attacker approach.
+    const edge = new THREE.Mesh(boxGeo, mats.hazard);
+    edge.scale.set(w, 0.26, 0.18);
+    edge.position.set((d.x0 + d.x1) / 2, d.top - 0.125, d.z1 - 0.09);
+    scene.add(edge);
+    // Railings along the north and south edges (visual only: fighters can
+    // still drop off the deck sides, and the ramps stay open).
+    const railGeo = new THREE.BoxGeometry(0.09, 1.0, 0.09);
+    for (let x = d.x0 + 0.4; x <= d.x1 - 0.2; x += 1.9) {
+      for (const z of [d.z0 + 0.12, d.z1 - 0.12]) {
+        const post = new THREE.Mesh(railGeo, steelMat);
+        post.position.set(x, d.top + 0.5, z);
+        scene.add(post);
+      }
+    }
+    for (const z of [d.z0 + 0.12, d.z1 - 0.12]) {
+      const rail = new THREE.Mesh(boxGeo, steelMat);
+      rail.scale.set(w, 0.09, 0.09);
+      rail.position.set((d.x0 + d.x1) / 2, d.top + 1.0, z);
+      scene.add(rail);
+    }
+  }
+  for (const r of RAMPS) {
+    const run = r.x1 - r.x0, rise = r.h1 - r.h0;
+    const len = Math.sqrt(run * run + rise * rise);
+    const ramp = new THREE.Mesh(boxGeo, deckMat);
+    ramp.scale.set(len, 0.22, r.z1 - r.z0);
+    ramp.position.set((r.x0 + r.x1) / 2, (r.h0 + r.h1) / 2 - 0.13, (r.z0 + r.z1) / 2);
+    ramp.rotation.z = Math.atan2(rise, run);
+    ramp.castShadow = true; ramp.receiveShadow = true;
+    scene.add(ramp);
+    // Tread strips across the slope so the climb reads from a distance.
+    for (let t = 0.15; t < 0.95; t += 0.2) {
+      const strip = new THREE.Mesh(boxGeo, mats.hazard);
+      strip.scale.set(0.16, 0.05, r.z1 - r.z0 - 0.3);
+      strip.position.set(
+        r.x0 + run * t,
+        r.h0 + rise * t + 0.1,
+        (r.z0 + r.z1) / 2,
+      );
+      strip.rotation.z = Math.atan2(rise, run);
+      scene.add(strip);
+    }
+  }
+
+  // Distant harbour skyline beyond the walls: silhouettes and cranes in the
+  // dusk haze, so the horizon reads as a working port instead of flat fog.
+  const skyMat = new THREE.MeshStandardMaterial({ color: 0x6b5a48, roughness: 1 });
+  const skyRng = makeRng(hashSeed('skyline'));
+  for (let i = 0; i < 10; i++) {
+    const ang = (i / 10) * Math.PI * 2 + skyRng() * 0.4;
+    const dist = 52 + skyRng() * 22;
+    const h = 7 + skyRng() * 13;
+    const sil = new THREE.Mesh(boxGeo, skyMat);
+    sil.scale.set(6 + skyRng() * 8, h, 6 + skyRng() * 6);
+    sil.position.set(Math.cos(ang) * dist, h / 2 - 0.5, Math.sin(ang) * dist);
+    scene.add(sil);
+  }
+  for (const [cx, cz] of [[-46, -30], [48, 26]]) {
+    const mast = new THREE.Mesh(boxGeo, skyMat);
+    mast.scale.set(1.1, 20, 1.1);
+    mast.position.set(cx, 9.5, cz);
+    scene.add(mast);
+    const jib = new THREE.Mesh(boxGeo, skyMat);
+    jib.scale.set(16, 0.8, 0.8);
+    jib.position.set(cx + 5, 19, cz);
+    scene.add(jib);
+    const cable = new THREE.Mesh(boxGeo, skyMat);
+    cable.scale.set(0.15, 5, 0.15);
+    cable.position.set(cx + 11, 16.5, cz);
+    scene.add(cable);
+  }
+  // Low sun disc in the west, glowing through the haze.
+  const sunDisc = new THREE.Mesh(
+    new THREE.CircleGeometry(4.5, 24),
+    new THREE.MeshBasicMaterial({ color: 0xffe9c0, fog: false }),
+  );
+  sunDisc.position.set(-70, 14, 30);
+  sunDisc.lookAt(0, 2, 0);
+  scene.add(sunDisc);
 
   // Site zones: translucent floor tint, corner posts, floating letter.
   for (const id of ['A', 'B']) {
@@ -381,56 +478,6 @@ export function updateBotVisual(a, dt, time) {
   }
 }
 
-// --- First-person viewmodels ---------------------------------------------------
-// One group per weapon, built from boxes; the active one is shown. The muzzle
-// Object3D marks the barrel tip for tracers and flash placement.
-export function makeViewmodels(camera) {
-  const root = new THREE.Group();
-  root.position.set(0.26, -0.22, -0.6);
-  root.scale.setScalar(0.8);
-  const metal = new THREE.MeshStandardMaterial({ color: 0x55504a, roughness: 0.55, metalness: 0.35 });
-  const gripMat = new THREE.MeshStandardMaterial({ color: 0x5a4530, roughness: 0.9 });
-  const accent = new THREE.MeshStandardMaterial({ color: 0xd88a3a, roughness: 0.6, metalness: 0.3 });
-  const box = new THREE.BoxGeometry(1, 1, 1);
-  const cyl = new THREE.CylinderGeometry(0.025, 0.025, 0.3, 8);
+// First-person viewmodels live in viewmodel.js (createViewmodel): one
+// procedural gun per weapon, attached to the player camera.
 
-  function part(parent, mat, sx, sy, sz, x, y, z) {
-    const m = new THREE.Mesh(box, mat);
-    m.scale.set(sx, sy, sz);
-    m.position.set(x, y, z);
-    parent.add(m);
-    return m;
-  }
-
-  const models = {};
-  const defs = {
-    sidearm: { len: 0.22, mag: 0.1 },
-    smg: { len: 0.4, mag: 0.16 },
-    rifle: { len: 0.55, mag: 0.18 },
-    marksman: { len: 0.72, mag: 0.12 },
-  };
-  for (const id of Object.keys(defs)) {
-    const d = defs[id];
-    const grp = new THREE.Group();
-    part(grp, metal, 0.07, 0.09, d.len, 0, 0, -d.len / 2);
-    const barrel = new THREE.Mesh(cyl, metal);
-    barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(0, 0.01, -d.len - 0.08);
-    grp.add(barrel);
-    part(grp, gripMat, 0.06, d.mag, 0.08, 0, -0.09, -0.08);
-    part(grp, gripMat, 0.06, 0.1, 0.07, 0, -0.07, 0.1);
-    part(grp, accent, 0.03, 0.03, 0.1, 0, 0.06, -d.len * 0.5);
-    if (id === 'marksman') {
-      part(grp, metal, 0.05, 0.05, 0.22, 0, 0.08, -0.25);
-    }
-    const muzzle = new THREE.Object3D();
-    muzzle.position.set(0, 0.01, -d.len - 0.24);
-    grp.add(muzzle);
-    grp.userData.muzzle = muzzle;
-    grp.visible = false;
-    root.add(grp);
-    models[id] = grp;
-  }
-  camera.add(root);
-  return { root, models };
-}

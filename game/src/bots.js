@@ -8,7 +8,7 @@ import { S } from './state.js';
 import { TUNE, WEAPONS } from './config.js';
 import { WAYPOINTS, HOLD_SPOTS, SITES, nearestNode, findPath, siteAt } from './mapdata.js';
 import { moveActor, segmentClear, eyeHeight } from './movement.js';
-import { tryFire, currentWeapon, selectSlot, throwGrenade, smokeBlocks } from './weapons.js';
+import { tryFire, currentWeapon, selectSlot, throwGrenade, smokeBlocks, startReload } from './weapons.js';
 import { holdChannel, canPlant, canDefuse, deviceCarrier } from './objective.js';
 import { rnd } from './rng.js';
 
@@ -113,10 +113,16 @@ function perceive(a, dt) {
     }
     b.target = best;
     b.lastKnownX = best.x; b.lastKnownZ = best.z;
+    b.lastKnownT = S.time;
+    b.noLosT = 0;
     b.investigate = null;
   } else if (b.target) {
-    // Lost sight: keep the last known position briefly, then give up.
-    if (S.time - b.seenTime > 1.4) b.target = null;
+    // Lost sight: keep the last known position briefly, then give up and
+    // go look there instead of standing still staring at a wall.
+    if (S.time - b.seenTime > 1.4) {
+      b.investigate = { x: b.lastKnownX, z: b.lastKnownZ, until: S.time + 3 };
+      b.target = null;
+    }
   }
   // Hearing: fresh noises inside their radius draw attention. A noise at the
   // bot's own feet is its own footstep or gunshot and is ignored.
@@ -147,6 +153,27 @@ function engage(a, dt) {
   const dx = t.x - a.x, dz = t.z - a.z;
   const dist = Math.sqrt(dx * dx + dz * dz);
   faceToward(a, t.x, t.z, dt, 4 + b.skill * 4);
+  // Fire discipline: hold fire without a clear line of sight. A bot whose
+  // target ducked behind cover or smoke does not spray the wall — it
+  // repositions toward the last known position to re-acquire the angle.
+  const oy = a.y + eyeHeight(a);
+  const chestY = t.y + (t.crouched ? 1.15 : 1.45);
+  const losClear = segmentClear(a.x, oy, a.z, t.x, chestY, t.z)
+    && !smokeBlocks(a.x, oy, a.z, t.x, chestY, t.z);
+  if (!losClear) {
+    b.noLosT += dt;
+    const hx = b.lastKnownX - a.x, hz = b.lastKnownZ - a.z;
+    const hl = Math.sqrt(hx * hx + hz * hz) || 1;
+    if (hl > 2) moveActor(a, hx / hl, hz / hl, TUNE.walkSpeed, dt, false);
+    else moveActor(a, 0, 0, 0, dt, false);
+    if (b.noLosT > 1.2) {
+      b.investigate = { x: b.lastKnownX, z: b.lastKnownZ, until: S.time + 3 };
+      b.target = null; b.noLosT = 0;
+    }
+    return;
+  }
+  b.noLosT = 0;
+  b.lastKnownX = t.x; b.lastKnownZ = t.z; b.lastKnownT = S.time;
   // Aim error shrinks while the target stays visible and the bot stands
   // still; moving or being blinded opens it back up.
   const settled = 0.012 + (1 - b.skill) * 0.02;
@@ -161,22 +188,36 @@ function engage(a, dt) {
   const wantCrouch = dist > 18 && w && w.id !== 'smg' && rnd() < 0.02;
   if (wantCrouch) a.crouched = true;
   // Strafe to be a harder target, closing the distance when far away and
-  // giving ground when the enemy is on top of the bot.
+  // giving ground when the enemy is on top of the bot. A badly hurt bot
+  // falls back toward cover instead of standing in the open trading shots.
   const px = -dz / (dist || 1), pz = dx / (dist || 1);
   let mx = px * b.strafeDir * 0.8, mz = pz * b.strafeDir * 0.8;
   if (dist > 14) { mx += (dx / dist) * 0.6; mz += (dz / dist) * 0.6; }
   else if (dist < 5) { mx -= (dx / dist) * 0.5; mz -= (dz / dist) * 0.5; }
+  if (a.hp < 30) { mx -= (dx / (dist || 1)) * 0.5; mz -= (dz / (dist || 1)) * 0.5; }
   const ml = Math.sqrt(mx * mx + mz * mz) || 1;
   moveActor(a, mx / ml, mz / ml, TUNE.walkSpeed * 0.6, dt, false);
-  // Fire in bursts once the reaction time has passed.
+  // Fire in bursts once the reaction time has passed. Burst length and
+  // pause scale with range: short taps at long range, longer bursts close
+  // in, and the marksman fires single aimed shots with a long reset.
   if (S.time < b.seenTime) return;
   if (b.burstLeft <= 0) {
     if (b.burstPause > 0) { b.burstPause -= dt; return; }
-    b.burstLeft = w && w.id === 'marksman' ? 1 : 2 + Math.floor(rnd() * 4);
-    b.burstPause = 0.25 + rnd() * 0.4;
+    if (w && w.id === 'marksman') {
+      b.burstLeft = 1;
+      b.burstPause = 0.7 + rnd() * 0.5;
+    } else if (dist > 18) {
+      b.burstLeft = 2;
+      b.burstPause = 0.45 + rnd() * 0.5;
+    } else if (dist > 8) {
+      b.burstLeft = 2 + Math.floor(rnd() * 3);
+      b.burstPause = 0.3 + rnd() * 0.35;
+    } else {
+      b.burstLeft = 3 + Math.floor(rnd() * 3);
+      b.burstPause = 0.2 + rnd() * 0.25;
+    }
   }
-  const oy = a.y + eyeHeight(a);
-  const ty = t.y + (t.crouched ? 1.15 : 1.45) + (rnd() - 0.5) * 0.2;
+  const ty = chestY + (rnd() - 0.5) * 0.2;
   const ddx = t.x - a.x, ddy = ty - oy, ddz = t.z - a.z;
   const len = Math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz) || 1;
   if (tryFire(a, a.x, oy, a.z, ddx / len, ddy / len, ddz / len, true)) b.burstLeft--;
@@ -223,6 +264,33 @@ function decide(a, dt) {
       // Rotate to the planted site and defuse. Re-path whenever the goal
       // changed, so a stale investigate path never leads the retake astray.
       if (canDefuse(a)) { b.state = 'defuse'; return; }
+      // Cutoff rotation: with time on the fuse and three or more defenders
+      // up, the defender farthest from the site holds the mid connector
+      // instead of stacking the defuse — cutting off the retake lane and
+      // keeping a second defuse attempt alive if the first fails.
+      const defsAlive = S.actors.filter((x) => x.team === 'def' && x.alive);
+      if (defsAlive.length >= 3 && S.device.fuse > 12) {
+        const ddx = a.x - S.device.x, ddz = a.z - S.device.z;
+        const myD = ddx * ddx + ddz * ddz;
+        let farthest = true;
+        for (const mate of defsAlive) {
+          if (mate === a) continue;
+          const mdx = mate.x - S.device.x, mdz = mate.z - S.device.z;
+          if (mdx * mdx + mdz * mdz > myD) { farthest = false; break; }
+        }
+        if (farthest) {
+          const cut = WAYPOINTS[24];
+          const cdx = cut.x - a.x, cdz = cut.z - a.z;
+          if (cdx * cdx + cdz * cdz > 2.25) {
+            b.state = 'move';
+            if (b.path.length === 0 || b.pathIdx >= b.path.length) setPath(a, 24);
+          } else {
+            b.state = 'hold';
+            b.holdSpot = { node: 24, yaw: S.device.site === 'A' ? 2.6 : -2.6 };
+          }
+          return;
+        }
+      }
       b.state = 'rotate';
       const goal = nearestNode(S.device.x, S.device.z);
       if (b.path.length === 0 || b.pathIdx >= b.path.length || b.path[b.path.length - 1] !== goal) {
@@ -263,6 +331,21 @@ function decide(a, dt) {
     return;
   }
   const pushSite = teamPushSite();
+  // Hunt: a non-carrier that lost sight of an enemy (or heard one) checks
+  // the last known position before resuming the push. The carrier never
+  // wanders — the plant comes first.
+  if (b.investigate && S.time < b.investigate.until && S.device.carrierId !== a.id) {
+    const idx = b.investigate.x, idz = b.investigate.z;
+    const qdx = idx - a.x, qdz = idz - a.z;
+    if (qdx * qdx + qdz * qdz > 4) {
+      b.state = 'move';
+      if (b.path.length === 0 || b.pathIdx >= b.path.length) {
+        setPath(a, nearestNode(idx, idz));
+      }
+      return;
+    }
+    b.investigate = null;
+  }
   if (b.role === 'lurk') {
     const other = pushSite === 'A' ? 'B' : 'A';
     if (siteAt(a.x, a.z) !== other) {
@@ -272,13 +355,14 @@ function decide(a, dt) {
     return;
   }
   if (b.role === 'mid') {
-    // Mid player holds the connector, then joins the push in the second half.
+    // Mid player takes the gantry deck, watching both lanes from above,
+    // then joins the push in the second half of the round.
     if (S.roundTimer < 55) {
       b.state = 'move';
       if (b.path.length === 0 || b.pathIdx >= b.path.length) setPath(a, siteGoalNode(pushSite));
-    } else if (nearestNode(a.x, a.z) !== 12) {
+    } else if (nearestNode(a.x, a.z) !== 31) {
       b.state = 'move';
-      if (b.path.length === 0 || b.pathIdx >= b.path.length) setPath(a, 12);
+      if (b.path.length === 0 || b.pathIdx >= b.path.length) setPath(a, 31);
     } else {
       b.state = 'hold';
     }
@@ -320,6 +404,10 @@ function act(a, dt) {
   if (b.state === 'hold') {
     moveActor(a, 0, 0, 0, dt, false);
     a.crouched = false;
+    // Reload discipline: top the magazine off while holding an angle with
+    // no enemy in sight, never in the middle of a fight.
+    const hw = currentWeapon(a);
+    if (hw && a.reloadTimer <= 0 && a.mag[hw.id] < hw.mag * 0.4) startReload(a);
     // Hold an angle, scanning slowly left and right.
     let wantYaw = b.holdSpot ? b.holdSpot.yaw : a.yaw;
     if (a.team === 'atk') {

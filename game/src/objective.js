@@ -19,8 +19,8 @@ export function makeBrain(role) {
     state: 'move', // 'move' | 'hold' | 'engage' | 'plant' | 'defuse' | 'rotate'
     path: [], pathIdx: 0,
     goalSite: null, holdSpot: null,
-    target: null, seenTime: -99, lastKnownX: 0, lastKnownZ: 0,
-    reaction: 0.35, aimErr: 0.05, burstLeft: 0, burstPause: 0,
+    target: null, seenTime: -99, lastKnownX: 0, lastKnownZ: 0, lastKnownT: -99,
+    reaction: 0.35, aimErr: 0.05, burstLeft: 0, burstPause: 0, noLosT: 0,
     skill: 0.5, blind: 0, holdUntil: 0,
     strafeDir: 1, strafeTimer: 0, investigate: null, scanYaw: 0,
     perceiveTimer: 0, decisionTimer: 0,

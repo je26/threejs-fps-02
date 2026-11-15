@@ -4,7 +4,7 @@
 // line-of-sight and grenades. All hot paths reuse module scratch values.
 
 import { TUNE } from './config.js';
-import { COLLIDERS, MAP_BOUNDS } from './mapdata.js';
+import { COLLIDERS, DECKS, MAP_BOUNDS, groundHeight } from './mapdata.js';
 
 const R = TUNE.bodyRadius;
 
@@ -19,7 +19,12 @@ export function collideMove(a, dx, dz) {
   a.z += dz;
   for (let pass = 0; pass < 2; pass++) {
     for (const c of COLLIDERS) {
-      if (a.y >= c.h) continue;
+      // A collider only blocks while the actor's body overlaps its height
+      // span: standing on top of it (feet at its top) or walking under a
+      // raised one (head below its base) both pass through freely. The
+      // 0.05 tolerance covers the gravity dip between ticks, so an actor
+      // standing on the gantry deck is never caught by its support posts.
+      if (a.y >= c.h - 0.05 || a.y + TUNE.bodyHeight <= (c.y0 || 0)) continue;
       const cx = Math.max(c.x0, Math.min(a.x, c.x1));
       const cz = Math.max(c.z0, Math.min(a.z, c.z1));
       const ox = a.x - cx, oz = a.z - cz;
@@ -63,8 +68,20 @@ export function moveActor(a, wishX, wishZ, speed, dt, wantJump) {
   if (wantJump && grounded) { a.vy = TUNE.jumpSpeed; a.grounded = false; }
   a.vy -= TUNE.gravity * dt;
   a.y += a.vy * dt;
-  if (a.y <= 0) { a.y = 0; a.vy = 0; a.grounded = true; }
   collideMove(a, a.vx * dt, a.vz * dt);
+  // Floor height: the ground, a ramp slope, or the gantry deck. A grounded
+  // actor snaps to the floor underfoot (climbing a ramp, stepping onto the
+  // deck, walking down again); walking off an edge leaves the actor
+  // airborne to fall, and a falling actor lands on the floor below.
+  const floor = groundHeight(a.x, a.z, a.y);
+  if (a.grounded) {
+    if (floor >= a.y - 0.6) { a.y = floor; a.vy = 0; }
+    else a.grounded = false;
+  }
+  if (!a.grounded && a.vy <= 0 && a.y <= floor) {
+    a.y = floor; a.vy = 0; a.grounded = true;
+  }
+  if (a.y < 0) { a.y = 0; a.vy = 0; a.grounded = true; }
   a.moving = (a.vx * a.vx + a.vz * a.vz) > 0.25;
 }
 
@@ -73,14 +90,15 @@ export function eyeHeight(a) {
 }
 
 // --- Ray queries -----------------------------------------------------------
-// Ray vs one AABB (slab test). Returns entry distance or Infinity.
-export function rayBox(ox, oy, oz, dx, dy, dz, c, maxDist) {
+// Ray vs one axis-aligned box given explicitly. Returns entry distance or
+// Infinity. rayBox is this test over a collider's footprint and height span.
+function slabBox(ox, oy, oz, dx, dy, dz, x0, z0, x1, z1, y0, y1, maxDist) {
   let tmin = 0, tmax = maxDist;
   // X slab.
   if (Math.abs(dx) < 1e-9) {
-    if (ox < c.x0 || ox > c.x1) return Infinity;
+    if (ox < x0 || ox > x1) return Infinity;
   } else {
-    let t1 = (c.x0 - ox) / dx, t2 = (c.x1 - ox) / dx;
+    let t1 = (x0 - ox) / dx, t2 = (x1 - ox) / dx;
     if (t1 > t2) { const t = t1; t1 = t2; t2 = t; }
     if (t1 > tmin) tmin = t1;
     if (t2 < tmax) tmax = t2;
@@ -88,19 +106,20 @@ export function rayBox(ox, oy, oz, dx, dy, dz, c, maxDist) {
   }
   // Z slab.
   if (Math.abs(dz) < 1e-9) {
-    if (oz < c.z0 || oz > c.z1) return Infinity;
+    if (oz < z0 || oz > z1) return Infinity;
   } else {
-    let t1 = (c.z0 - oz) / dz, t2 = (c.z1 - oz) / dz;
+    let t1 = (z0 - oz) / dz, t2 = (z1 - oz) / dz;
     if (t1 > t2) { const t = t1; t1 = t2; t2 = t; }
     if (t1 > tmin) tmin = t1;
     if (t2 < tmax) tmax = t2;
     if (tmin > tmax) return Infinity;
   }
-  // Y slab: box spans 0..h.
+  // Y slab: the box spans y0..y1 (raised boxes, like the deck crate, leave
+  // the space below them open).
   if (Math.abs(dy) < 1e-9) {
-    if (oy < 0 || oy > c.h) return Infinity;
+    if (oy < y0 || oy > y1) return Infinity;
   } else {
-    let t1 = (0 - oy) / dy, t2 = (c.h - oy) / dy;
+    let t1 = (y0 - oy) / dy, t2 = (y1 - oy) / dy;
     if (t1 > t2) { const t = t1; t1 = t2; t2 = t; }
     if (t1 > tmin) tmin = t1;
     if (t2 < tmax) tmax = t2;
@@ -109,11 +128,20 @@ export function rayBox(ox, oy, oz, dx, dy, dz, c, maxDist) {
   return tmin;
 }
 
-// Nearest wall distance along a ray, or Infinity. Ground plane included.
+export function rayBox(ox, oy, oz, dx, dy, dz, c, maxDist) {
+  return slabBox(ox, oy, oz, dx, dy, dz, c.x0, c.z0, c.x1, c.z1, c.y0 || 0, c.h, maxDist);
+}
+
+// Nearest wall distance along a ray, or Infinity. Ground plane included,
+// and the gantry deck slab blocks shots and sight between its two levels.
 export function rayHitWall(ox, oy, oz, dx, dy, dz, maxDist) {
   let best = maxDist;
   for (const c of COLLIDERS) {
     const t = rayBox(ox, oy, oz, dx, dy, dz, c, best);
+    if (t < best) best = t;
+  }
+  for (const d of DECKS) {
+    const t = slabBox(ox, oy, oz, dx, dy, dz, d.x0, d.z0, d.x1, d.z1, d.top - 0.25, d.top, best);
     if (t < best) best = t;
   }
   if (dy < -1e-9) {

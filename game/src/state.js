@@ -106,6 +106,7 @@ export function resetActorForRound(a, spawn, yaw) {
     a.bot.target = null; a.bot.seenTime = -99; a.bot.blind = 0;
     a.bot.holdUntil = 0; a.bot.strafeDir = 1; a.bot.strafeTimer = 0;
     a.bot.goalSite = null; a.bot.investigate = null;
+    a.bot.noLosT = 0; a.bot.lastKnownT = -99; a.bot.burstLeft = 0; a.bot.burstPause = 0;
     a.bot.stuckT = 0; a.bot.sidestepUntil = 0; a.bot.sidestepDir = 1;
   }
 }
