@@ -43,7 +43,6 @@ async function main() {
   const shotsDir = path.join(root, 'screenshots');
   if (!existsSync(gameDir)) throw new Error('game/ directory missing: ' + gameDir);
   if (!existsSync(shotsDir)) throw new Error('screenshots/ directory missing: ' + shotsDir);
-  await rm(outDir, { recursive: true, force: true });
   await mkdir(outDir, { recursive: true });
   await mkdir(path.join(outDir, 'game'), { recursive: true });
   await mkdir(path.join(outDir, 'screenshots'), { recursive: true });
