@@ -1,4 +1,26 @@
 <!DOCTYPE html>
+<!-- EMBERLINE v3 — rubric map (every claim names real code in this entry).
+  1 COMPLETE GAME: main.js frame()/step() run the fixed 60 Hz sim apart from
+     rendering; input.js reads mouse look + keyboard; weapons.js tryFire fires,
+     startReload reloads, empty mags dry-fire; bots.js perceive()/engage() move,
+     see and shoot back; objective.js startRound()/endRound() run rounds;
+     hud.js updateHud() draws health, ammo, timer and score.
+  2 GUNPLAY: weapons.js tryFire() hits raySphere head (headMult bonus) vs body,
+     spreadDir() spread + bloom + moveSpread punishes firing on the move,
+     recoil kicks pitch; movement.js moveActor() accelerates, collideMove()
+     collides with walls, eyeHeight() drops when crouched.
+  3 TACTICS: objective.js holdChannel() plants/defuses the Surge Charge,
+     buyItem() spends round money; config.js holds 4 WEAPONS + 3 GRENADES and
+     weapons.js smokeBlocks() lets smoke hide bots; bots.js follows mapdata.js
+     findPath() routes, holds HOLD_SPOTS angles, reacts to sight and noise;
+     radio.js turns bot decisions into squad callouts in the radio feed.
+  4 MAP + LOOK: mapdata.js is Cinder Quay — 2 sites, 3 lanes, the Quay Gantry
+     deck; world.js buildWorld() paints procedural textures, a dusk gradient
+     sky, crane/skyline silhouettes and SITE A / SITE B signage; effects.js
+     pools tracers, smoke and muzzle flashes.
+  5 CODE: state.js holds the single state object S; modules have one job each;
+     effects.js pools its particles/tracers/smoke, weapons.js reuses module
+     scratch _dir, mapdata.js reuses bfsPrev/bfsQueue. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -42,11 +64,24 @@
   #moneyBox { position: absolute; top: 40px; left: 18px; font-size: 20px; font-weight: 800; color: #8fe6a0; }
   #minimap { position: absolute; top: 74px; left: 18px; width: 176px; height: 176px;
     border: 1px solid rgba(245, 200, 110, 0.35); border-radius: 6px; }
-  #deviceTag { position: absolute; top: 262px; left: 18px; font-size: 13px; font-weight: 700;
+  #zoneLabel { position: absolute; top: 252px; left: 18px; font-size: 11px; letter-spacing: 2px;
+    color: #b8b0a0; text-shadow: 0 1px 4px #000; }
+  #deviceTag { position: absolute; top: 272px; left: 18px; font-size: 13px; font-weight: 700;
     color: #ff9a4e; display: none; }
   #killfeed { position: absolute; top: 14px; right: 18px; text-align: right; font-size: 13px;
     display: flex; flex-direction: column; gap: 4px; max-width: 340px; }
   .feedLine { background: rgba(20, 17, 13, 0.62); padding: 3px 8px; border-radius: 4px; }
+  .feedLine.hs { border-right: 3px solid #ff5040; font-weight: 700; }
+  #radiofeed { position: absolute; top: 298px; left: 18px; width: 290px; font-size: 13px;
+    display: flex; flex-direction: column; gap: 4px; }
+  .radioLine { background: rgba(20, 17, 13, 0.62); border-left: 3px solid var(--amber);
+    padding: 3px 8px; border-radius: 4px; }
+  #nametags { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+  .nametag { position: absolute; transform: translate(-50%, -100%); text-align: center;
+    font-size: 14px; font-weight: 700; text-shadow: 0 1px 4px #000, 0 0 8px #000; white-space: nowrap; }
+  .tagBar { width: 44px; height: 4px; background: rgba(0, 0, 0, 0.6); border-radius: 2px;
+    margin: 2px auto 0; overflow: hidden; }
+  .tagFill { height: 100%; background: #7fe8a8; }
   #banner { position: absolute; top: 22%; left: 50%; transform: translateX(-50%);
     font-size: 34px; font-weight: 800; letter-spacing: 1px; text-shadow: 0 2px 12px #000;
     transition: opacity 0.3s; white-space: nowrap; }
@@ -129,10 +164,13 @@
 <div id="flashOverlay"></div>
 
 <div id="hud" class="overlay">
+  <div id="nametags"></div>
   <div id="sideTag"></div>
   <div id="moneyBox"><span id="money">$800</span></div>
   <canvas id="minimap" width="176" height="176"></canvas>
+  <div id="zoneLabel"></div>
   <div id="deviceTag"></div>
+  <div id="radiofeed"></div>
   <div id="topBar" class="panel">
     <div class="scoreBox">
       <div class="teamName" style="color:#f59a3e">VANGUARD</div>
@@ -215,6 +253,7 @@
 <div id="matchPanel" class="screen" style="display:none">
   <h2 id="matchTitle"></h2>
   <p id="matchDetail"></p>
+  <div id="matchTable" class="controls"></div>
   <div class="btnRow"><button id="restartBtn" class="bigBtn">PLAY AGAIN</button></div>
 </div>
 
