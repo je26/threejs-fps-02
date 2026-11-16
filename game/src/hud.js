@@ -6,11 +6,14 @@
 import { S, aliveCount } from './state.js';
 import { TUNE, WEAPONS, GRENADES, BUY_ITEMS, TEAMS, GAME_TITLE, MAP_NAME, DEVICE_NAME } from './config.js';
 import { currentWeapon, isGrenadeSelected } from './weapons.js';
+import { zoneName } from './radio.js';
 
 const $ = (id) => document.getElementById(id);
 let el = {};
 let lastFeedLen = -1;
+let lastRadioSig = '';
 let lastBuySig = '';
+let lastPhase = '';
 let callbacks = null;
 
 function fmtTime(sec) {
@@ -28,7 +31,7 @@ export function initHud(cb) {
     timerLabel: $('timerLabel'), scoreAtk: $('scoreAtk'), scoreDef: $('scoreDef'),
     aliveAtk: $('aliveAtk'), aliveDef: $('aliveDef'), roundNum: $('roundNum'),
     crosshair: $('crosshair'), hitmarker: $('hitmarker'), killfeed: $('killfeed'),
-    banner: $('banner'), message: $('message'), channel: $('channel'),
+    radiofeed: $('radiofeed'), banner: $('banner'), message: $('message'), channel: $('channel'),
     channelFill: $('channelFill'), channelLabel: $('channelLabel'),
     grenades: $('grenades'), deviceTag: $('deviceTag'),
     vignette: $('vignette'), flash: $('flashOverlay'),
@@ -37,6 +40,7 @@ export function initHud(cb) {
     pausePanel: $('pausePanel'), roundTitle: $('roundTitle'), roundDetail: $('roundDetail'),
     matchTitle: $('matchTitle'), matchDetail: $('matchDetail'),
     sideTag: $('sideTag'), spectate: $('spectate'),
+    zoneLabel: $('zoneLabel'), matchTable: $('matchTable'),
   };
   $('titleText').textContent = GAME_TITLE;
   $('mapText').textContent = MAP_NAME + ' — first to ' + TUNE.winRounds + ' rounds';
@@ -102,7 +106,52 @@ function updateFeed() {
     d.className = 'feedLine';
     d.style.color = f.css;
     d.textContent = f.text;
+    if (f.text.indexOf('HEADSHOT') >= 0) d.classList.add('hs');
     el.killfeed.appendChild(d);
+  }
+}
+
+// Radio feed: squad callouts from radio.js, newest last, fading after 8s.
+// Re-rendered at most once a second (the signature carries the whole second),
+// so expired lines drop without a per-frame DOM rebuild.
+function updateRadio() {
+  const sig = S.radio.length + '|' + Math.floor(S.time);
+  if (sig === lastRadioSig) return;
+  lastRadioSig = sig;
+  el.radiofeed.innerHTML = '';
+  for (const r of S.radio) {
+    if (S.time - r.time > 8) continue;
+    const d = document.createElement('div');
+    d.className = 'radioLine';
+    const n = document.createElement('span');
+    n.textContent = '» ' + r.name + ': ';
+    n.style.color = r.css;
+    d.appendChild(n);
+    d.appendChild(document.createTextNode(r.text));
+    el.radiofeed.appendChild(d);
+  }
+}
+
+// Match scoreboard: per-player kills and deaths from the real totals in
+// state.js, most kills first. Built once, on entering the matchEnd phase.
+function buildMatchTable() {
+  const t = el.matchTable;
+  t.innerHTML = '';
+  for (const team of ['atk', 'def']) {
+    const col = document.createElement('div');
+    const head = document.createElement('b');
+    head.textContent = TEAMS[team].name + '  ' + S.wins[team];
+    head.style.color = TEAMS[team].css;
+    col.appendChild(head);
+    const rows = [];
+    for (const a of S.actors) if (a.team === team) rows.push(a);
+    rows.sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
+    for (const a of rows) {
+      const r = document.createElement('div');
+      r.textContent = a.name + '  ' + a.kills + 'K ' + a.deaths + 'D';
+      col.appendChild(r);
+    }
+    t.appendChild(col);
   }
 }
 
@@ -126,6 +175,7 @@ export function updateHud(dt) {
   el.money.textContent = '$' + p.money;
   el.sideTag.textContent = TEAMS[p.team].name;
   el.sideTag.style.color = TEAMS[p.team].css;
+  el.zoneLabel.textContent = zoneName(p.x, p.z) + ' · ' + MAP_NAME;
 
   // Weapon and ammo.
   const w = currentWeapon(p);
@@ -214,9 +264,12 @@ export function updateHud(dt) {
     const won = S.matchWinner === p.team;
     el.matchTitle.textContent = won ? 'Victory — ' + TEAMS[S.matchWinner].name + ' win the match' : 'Defeat — ' + TEAMS[S.matchWinner].name + ' win the match';
     el.matchDetail.textContent = 'Final score ' + S.wins.atk + ' – ' + S.wins.def + ' across ' + S.round + ' rounds.';
+    if (lastPhase !== 'matchEnd') buildMatchTable();
   }
+  lastPhase = S.phase;
 
   updateFeed();
+  updateRadio();
   updateBuyMenu();
   void dt;
 }
