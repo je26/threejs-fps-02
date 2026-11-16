@@ -1,11 +1,30 @@
-# EMBERLINE — Cinder Quay
+# threejs-fps-02 — EMBERLINE
 
-A complete round-based tactical first-person shooter that runs entirely in
-the browser. Two teams of five fight over a dockside quay at dusk: the
-Ember Vanguard attack, the Quay Wardens defend, and every round is decided
-by elimination, detonation, defusal, or the clock. The game is fully
-self-contained — no network requests, no external assets, no build step —
-with procedural art, synthesized sound, and bots that play the objective.
+[![make.fun · threejs-fps-02](https://make.fun/badge/threejs-fps-02.svg)](https://make.fun/bounty/threejs-fps-02?utm_source=github&utm_medium=readme&utm_campaign=threejs-fps-02)
+[![rank](https://make.fun/badge/threejs-fps-02/je26/threejs-fps-02/rank.svg)](https://make.fun/bounty/threejs-fps-02/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=threejs-fps-02)
+[![reward](https://make.fun/badge/threejs-fps-02/je26/threejs-fps-02/reward.svg)](https://make.fun/bounty/threejs-fps-02?utm_source=github&utm_medium=readme&utm_campaign=threejs-fps-02)
+
+EMBERLINE is a complete round-based tactical first-person shooter that runs
+entirely in the browser. Two teams of five fight over a dockside quay at
+dusk: the Ember Vanguard attack with a Surge Charge to plant, the Quay
+Wardens defend, and every round is decided by elimination, detonation,
+defusal, or the clock. The game is fully self-contained — no network
+requests, no external assets, no build step — with procedural art,
+synthesized sound, and bots that play the objective.
+
+## Run it
+
+```sh
+cd game && python3 -m http.server 8901
+```
+
+Then visit `http://127.0.0.1:8901/`. Click a side to start. Mouse look uses
+pointer lock; if pointer lock is unavailable, hold and drag the mouse to
+look around instead.
+
+---
+
+<sub>Entered on [make.fun](https://make.fun/?ref=vr3vbks4&utm_source=github&utm_medium=readme&utm_campaign=threejs-fps-02) · AI agents build software for cash rewards</sub>
 
 ## Features
 
@@ -16,6 +35,7 @@ with procedural art, synthesized sound, and bots that play the objective.
 - **Bots** — nine bots on waypoint routes with vision cones, line-of-sight
   checks, hearing, held angles, rotations, site pushes, planting, and
   defusing. The device carrier leads the attack; defenders hold and rotate.
+  Bots call out what they see and plan over the squad radio feed.
 - **Weapons** — P9 Lark sidearm, K7 Hornet SMG, AR-4 Ember rifle, and MR-9
   Longshot marksman rifle, each with distinct damage, fire rate, magazine,
   reload, spread, recoil, range falloff, and movement penalty. Headshots
@@ -28,20 +48,6 @@ with procedural art, synthesized sound, and bots that play the objective.
 - **Map** — Cinder Quay: three lanes, two sites, a middle connector,
   crates, containers, and sightlines worth holding, in one dusk palette
   with sun, fill light, and fog.
-
-## How to play locally
-
-Serve the `game` directory over HTTP (module scripts need it) and open the
-index page in desktop Chrome, for example:
-
-```sh
-cd game
-python3 -m http.server 8901
-```
-
-Then visit `http://127.0.0.1:8901/`. Click a side to start. Mouse look uses
-pointer lock; if pointer lock is unavailable, hold and drag the mouse to
-look around instead.
 
 ## Controls
 
@@ -69,6 +75,7 @@ jumps · P pauses · M mutes.
   `effects.js` — pooled tracers, particles, smoke, muzzle flash.
 - `game/src/audio.js` — WebAudio-synthesized sounds, no audio files.
   `hud.js` — HUD, buy menu, round panels. `minimap.js` — 2D minimap.
+- `game/src/radio.js` — bot radio callouts from simulation events.
 - `game/vendor/three/` — vendored three.js 0.187.0 (unmodified).
 - `screenshots/` — four captured gameplay screenshots.
 - `vendor/` — the dossier builder library (unmodified).
